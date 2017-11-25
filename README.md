@@ -1,2 +1,2 @@
 # ifconfig
-Cross platform way to get information about network adapters
+A cross platform way to get information about network adapters
