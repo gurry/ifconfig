@@ -1,6 +1,6 @@
 [package]
 name = "ifconfig"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Gurinder Singh <gurinder.singh@1e.com>"]
 description = "A cross platform way to get information about network adapters"
 license = "MIT"
