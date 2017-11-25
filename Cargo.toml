@@ -4,5 +4,6 @@ version = "0.1.0"
 authors = ["Gurinder Singh <gurinder.singh@1e.com>"]
 description = "A cross platform way to get information about network adapters"
 license = "MIT"
+repository = "https://github.com/gurry/ifconfig"
 
 [dependencies]
