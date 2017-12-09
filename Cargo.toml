@@ -7,3 +7,7 @@ license = "MIT"
 repository = "https://github.com/gurry/ifconfig"
 
 [dependencies]
+failure = "0.1.1"
+libc = "0.2.34"
+foreign-types = "0.3.2"
+winapi = "0.2.8"
