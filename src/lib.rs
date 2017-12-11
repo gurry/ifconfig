@@ -7,6 +7,7 @@ extern crate widestring;
 extern crate socket2;
 
 use failure::Error;
+use std::net::IpAddr;
 
 mod os;
 mod data_types;
@@ -45,8 +46,11 @@ mod test {
         for i in interfaces {
             let index = i.index();
             let name = i.name();
+            let friendly_name = i.friendly_name();
             let mtu = i.mtu();
-            let ip_addr: Vec<IpAddr> = i.ip_addrs().collect();
+            let description = i.description ();
+            let ip_addr: Vec<String> = i.ip_addrs().map(|ip| ip.to_string()).collect();
+            let hw_addr = i.hw_addr();
         }
     }
 }

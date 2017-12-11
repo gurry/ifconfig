@@ -3,12 +3,11 @@ mod bindings;
 use std;
 use std::ffi::CStr;
 use winapi::{AF_UNSPEC, ERROR_SUCCESS, ERROR_BUFFER_OVERFLOW};
-use widestring::WideCString;
-use std::ptr;
+use widestring::WideCStr;
 use socket2;
 use std::net::IpAddr;
 use failure::Error;
-use data_types::Flags;
+use data_types::{Flags, HardwareAddr, EUI48_LEN};
 use self::bindings::*;
 
 
@@ -28,6 +27,11 @@ enum WindowsError {
     UnknownError {
         error_code: u32,
     }
+
+    // #[fail(display = "Hardware addr has unsupported length {}. Should be {}", len, Eui48)]
+    // BadHardwareAddr {
+    //     len: usize
+    // }
 }
 
 pub struct Interface(PIP_ADAPTER_ADDRESSES);
@@ -50,12 +54,36 @@ impl Interface {
         unsafe { CStr::from_ptr((*self.0).AdapterName) }.to_str().expect("AdapterName could not be converted to &str")
     }
 
-    // TODO: implement this 
-    // pub fn hw_addr(&self) -> Option<HardwareAddr> {
-    //     let hw_addr = if (self.0.PhysicalAddressLength > 0) {
+    // TODO: can we return OsStr here instead?
+    pub fn friendly_name(&self) -> String {
+        // Must return an owned string here because there's no way to return a zero-copy &str type since Windows wide strings very different from Rust's utf8 strings
+        unsafe { WideCStr::from_ptr_str((*self.0).FriendlyName) }.to_string().expect("FriendlyName could not be converted to String")
+    }
 
-    //      }
-    // }
+    // TODO: can we return OsStr here instead?
+    pub fn description(&self) -> String {
+        // Must return an owned string here because there's no way to return a zero-copy &str type since Windows wide strings very different from Rust's utf8 strings
+        unsafe { WideCStr::from_ptr_str((*self.0).Description) }.to_string().expect("Description could not be converted to String")
+    }
+
+    pub fn hw_addr(&self) -> Result<Option<HardwareAddr>, Error> {
+        unsafe {
+            let len = (*self.0).PhysicalAddressLength as usize;
+            if len == 0 {
+                Ok(None)
+            }
+            else if len != EUI48_LEN {
+                Ok(None)
+                // Err(WindowsError::BadHardwareAddr { len })
+            }
+            else {
+                let ptr: *const u8 = (*self.0).PhysicalAddress.as_ptr();
+                let bytes =  &*(ptr as *const [u8; 6]);
+                // let slice = unsafe { std::slice::from_raw_parts((*self.0).PhysicalAddress.as_ptr(), Eui48Len) };
+                Ok(Some(HardwareAddr::from_bytes(bytes)))
+            }
+         }
+    }
 
     // TODO: this should also include anycast addresses they way golang implementatio does
     /// Get the adapter's ip addresses (unicast ip addresses)
@@ -175,6 +203,9 @@ pub fn get_interfaces() -> Result<InterfaceIterator, Error> {
             adapters_addresses_buffer = vec![0; buf_len as usize];
             adapter_addresses_ptr = std::mem::transmute(adapters_addresses_buffer.as_mut_ptr());
             result = GetAdaptersAddresses(AF_UNSPEC as u32, 0, std::ptr::null_mut(), adapter_addresses_ptr, &mut buf_len as *mut ULONG);
+            if result != ERROR_SUCCESS {
+                bail!(WindowsError::UnknownError { error_code: result }); // TODO: design proper error types and return that
+            }
         }
         else if result != ERROR_SUCCESS {
             bail!(WindowsError::UnknownError { error_code: result }); // TODO: design proper error types and return that

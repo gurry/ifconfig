@@ -1,15 +1,20 @@
+pub const EUI48_LEN: usize = 6;
 
-const MaxHwAddrLength: u32 = 8;
 // IEEE MAC-48, EUI-48 and EUI-64 form
-pub struct HardwareAddr {
-    addr: Vec<u8>, // TODO: make this zero cast. Use a slice instead of vec here
+pub struct HardwareAddr<'a> {
+    bytes: &'a [u8; EUI48_LEN], // TODO: Should we also cater for 8 byte EUI-64 addresses?
 }
 
-// impl HardwareAddr {
-//     fn from(bytes: &[u8]) -> Self {
-//         Self { addr: bytes.clone(), len: bytes.len() }
-//     }
-// }
+impl<'a> HardwareAddr<'a> {
+    pub fn from_bytes(bytes: &'a [u8; EUI48_LEN]) -> Self {
+        Self { bytes }
+    }
+
+    // TODO: Should we also cater for 8 byte EUI-64 addresses?
+    pub fn to_string(&self) -> String {
+        format!("{:02x}-{:02x}-{:02x}-{:02x}-{:02x}-{:02x}", self.bytes[0], self.bytes[1], self.bytes[2], self.bytes[3], self.bytes[4], self.bytes[5])
+    }
+}
 
 bitflags! {
     pub struct Flags: u32 {
