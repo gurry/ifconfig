@@ -1,5 +1,10 @@
+#![feature(conservative_impl_trait)]
+
 #[macro_use] extern crate failure;
 #[macro_use] extern crate bitflags;
+extern crate winapi;
+extern crate widestring;
+extern crate socket2;
 
 use std::io;
 use std::ptr;
@@ -7,16 +12,19 @@ use std::ffi::CStr;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use failure::Error;
 
-// IEEE MAC-48, EUI-48 and EUI-64 form
-struct HardwareAddr([u8; 6]); // TODO: should we use something other than bytes as the underlying type? Are 6 bytes enough?
+mod os;
+mod data_types;
 
-struct Interface {
-  	index: u32,
-  	mtu: u32,    // TODO; should we use Bytes() type here form byte_units crate
-  	name: String, // TODO: should we use an &str instead?
-  	hw_addr: HardwareAddr, 
-  	flags: Flags,
-}
+#[cfg(target_os = "linux")]
+use os::linux as imp;
+
+#[cfg(target_os = "windows")]
+use os::windows as imp;
+
+#[cfg(target_os = "windows")]
+pub use os::windows::Interface as Interface;
+#[cfg(target_os = "windows")]
+use os::windows::InterfaceIterator;
 
 bitflags! {
     struct Flags: u32 {
@@ -29,29 +37,45 @@ bitflags! {
 }
 
 // Returns a list of the system's network interfaces.
-#[cfg(target_os = "linux")]
-pub fn get_interfaces() -> Result<impl Iterator<Item=&Interface>, Error> {
-    Ok(Vec::new().iter())
+pub fn get_interfaces() -> Result<impl Iterator<Item=Interface>, Error> {
+    imp::get_interfaces()
 }
 
-#[cfg(target_os = "windows")]
-pub fn get_interfaces() -> Result<impl Iterator<Item=&Interface>, Error> {
-    Ok(Vec::new().iter())
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn basic() {
+        let interfaces = get_interfaces().unwrap();
+        for i in interfaces {
+            println!("{:?}", i.index());
+            println!("{:?}", i.name());
+            println!("{:?}", i.mtu());
+        }
+        // println!(
+        //     "{:?}",
+        //     addrs
+        //         .iter()
+        //         .map(|a| (a.name(), a.addr()))
+        //         .collect::<Vec<_>>()
+        // );
+    }
 }
 
 // Returns a list of the system's unicast interface addresses.
 //
 // The returned list does not identify the associated interface.
 // Use get_interfaces and Interface.addrs() for more detail.
-#[cfg(target_os = "linux")]
-pub fn get_addrs() -> Result<impl Iterator<Item=IpAddr>, Error> {
-    linux::get_addrs()
-}
+// #[cfg(target_os = "linux")]
+// pub fn get_addrs() -> Result<impl Iterator<Item=IpAddr>, Error> {
+//     os::linux::get_addrs()
+// }
 
-#[cfg(target_os = "windows")]
-pub fn get_addrs() -> Result<impl Iterator<Item=IpAddr>, Error> {
-    windows::get_addrs()
-}
+// #[cfg(target_os = "windows")]
+// pub fn get_addrs() -> Result<impl Iterator<Item=IpAddr>, Error> {
+//     os::windows::get_addrs()
+// }
 
 // Corresponding functions from golang recorded below for reference
 // func Interfaces() ([]Interface, error) {

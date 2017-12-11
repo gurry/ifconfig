@@ -126,6 +126,11 @@ pub struct IfAddrsRef;
 //     }
 // }
 
+
+pub fn get_interfaces() -> Result<impl Iterator<Item=Interface>, Error> {
+    unimplemented!()
+}
+
 fn get_addrs() -> Result<impl Iterator<Item=IpAddr>, Error> {
     let mut conn = NetlinkConnection::new();
     let links = conn.iter_links().unwrap().collect::<Vec<_>>();

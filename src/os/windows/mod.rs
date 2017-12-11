@@ -1,54 +1,145 @@
 mod bindings;
 
-extern crate winapi;
-use self::winapi::{AF_UNSPEC, ERROR_SUCCESS, ERROR_BUFFER_OVERFLOW, ULONG};
+use std;
+use std::ffi::CStr;
+use winapi::{AF_UNSPEC, ERROR_SUCCESS, ERROR_BUFFER_OVERFLOW};
+use widestring::WideCString;
+use std::ptr;
+use socket2;
+use std::net::IpAddr;
+use failure::Error;
+use data_types::Flags;
+use self::bindings::*;
 
-//fn GetAdaptersAddresses ( Family : ULONG , Flags : ULONG , Reserved : PVOID , AdapterAddresses : PIP_ADAPTER_ADDRESSES , SizePointer : PULONG , ) -> ULONG; 
 
-pub fn get_adapters() -> Result<Vec<Adapter>> {
-    unsafe {
-        let mut buf_len: ULONG = 0;
-        let result = GetAdaptersAddresses(AF_UNSPEC as u32, 0, std::ptr::null_mut(), std::ptr::null_mut(), &mut buf_len as *mut ULONG);
+const IF_TYPE_OTHER: u32 = 1;
+const IF_TYPE_ETHERNET_CSMACD: u32 = 6;
+const IF_TYPE_ISO88025_TOKENRING: u32 = 9;
+const IF_TYPE_PPP: u32 = 23;
+const IF_TYPE_SOFTWARE_LOOPBACK: u32 = 24;
+const IF_TYPE_ATM: u32 = 37;
+const IF_TYPE_IEEE80211: u32 = 71;
+const IF_TYPE_TUNNEL: u32 = 131;
+const IF_TYPE_IEEE1394: u32 = 144;
 
-        assert!(result != ERROR_SUCCESS);
-
-        if result != ERROR_BUFFER_OVERFLOW {
-            bail!(ErrorKind::Os(result));
-        }
-
-        let mut adapters_addresses_buffer: Vec<u8> = vec![0; buf_len as usize];
-        let mut adapter_addresses_ptr: PIP_ADAPTER_ADDRESSES = std::mem::transmute(adapters_addresses_buffer.as_mut_ptr());
-        let result = GetAdaptersAddresses(AF_UNSPEC as u32, 0, std::ptr::null_mut(), adapter_addresses_ptr, &mut buf_len as *mut ULONG);
-
-        if result != ERROR_SUCCESS {
-            bail!(ErrorKind::Os(result));
-        }
-
-        let mut adapters = vec![];
-        while adapter_addresses_ptr != std::ptr::null_mut() {
-            adapters.push(get_adapter(adapter_addresses_ptr)?);
-            adapter_addresses_ptr = (*adapter_addresses_ptr).Next;
-        }
-
-        Ok(adapters)
+#[derive(Debug, Fail)]
+enum WindowsError {
+    #[fail(display = "Windows error: {}", error_code)]
+    UnknownError {
+        error_code: u32,
     }
 }
 
-unsafe fn get_adapter(adapter_addresses_ptr: PIP_ADAPTER_ADDRESSES) -> Result<Adapter> {
-    let adapter_addresses = &*adapter_addresses_ptr;
-    let adapter_name = CStr::from_ptr(adapter_addresses.AdapterName).to_str()?.to_owned();
-    let dns_servers = get_dns_servers(adapter_addresses.FirstDnsServerAddress)?;
-    let unicast_addresses = get_unicast_addresses(adapter_addresses.FirstUnicastAddress)?;
+pub struct Interface(PIP_ADAPTER_ADDRESSES);
 
-    let description = WideCString::from_ptr_str(adapter_addresses.Description).to_string()?;
-    let friendly_name = WideCString::from_ptr_str(adapter_addresses.FriendlyName).to_string()?;
-    Ok(Adapter {
-        adapter_name: adapter_name,
-        ip_addresses: unicast_addresses,
-        dns_servers: dns_servers,
-        description: description,
-        friendly_name: friendly_name,
-    })
+impl Interface {
+    pub fn index(&self) -> u32 {
+        let mut index = unsafe {(*self.0).__bindgen_anon_1.__bindgen_anon_1.IfIndex }; // Using ipV4 if index
+        if index == 0 { // If ipv4 index was zero. As per MSDN this can happen if ipv4 is disabled on this interface
+            index = unsafe { (*self.0).Ipv6IfIndex };
+        }
+
+        index
+    }
+
+    pub fn mtu(&self) -> u32 { // TODO: what does a value of 0xffffffff mean for the MTU field in the inner struct
+        unsafe { (*self.0).Mtu }
+    }
+
+    pub fn name(&self) -> &str {
+        unsafe { CStr::from_ptr((*self.0).AdapterName) }.to_str().expect("AdapterName could not be converted to &str")
+    }
+
+    // TODO: implement this 
+    // pub fn hw_addr(&self) -> Option<HardwareAddr> {
+    //     let hw_addr = if (self.0.PhysicalAddressLength > 0) {
+
+    //      }
+    // }
+
+    // TODO: this should also include anycast addresses they way golang implementatio does
+    /// Get the adapter's ip addresses (unicast ip addresses)
+    pub fn ip_addrs(&self) -> impl Iterator<Item=IpAddr> { // TODO: Should we rename this to unicast_ip_addresses?
+        IpAddrIterator::from(unsafe { (*self.0).FirstUnicastAddress })
+    }
+
+    // pub fn ip_addrs_multicast(&self) -> impl Iterator<Item=IpAddr> { // TODO: Should we rename this to unicast_ip_addresses?
+    //     IpAddrIterator::from(self.0.FistUnicastAddress)
+    // }
+
+
+    pub fn flags(&self) -> Flags {
+        // Shamelessly copied from what the Golang people are doing.
+        // There is also a comment that ideally the below info should come from MIB_IF_ROW2.AccessType. But go with this for now.
+        unsafe {
+            match (*self.0).IfType {
+                IF_TYPE_ETHERNET_CSMACD | IF_TYPE_ISO88025_TOKENRING | IF_TYPE_IEEE80211 | IF_TYPE_IEEE1394 => {
+                    Flags::BROADCAST | Flags::MULTICAST
+                },
+                IF_TYPE_PPP | IF_TYPE_TUNNEL => {
+                    Flags::POINT_TO_POINT | Flags::MULTICAST
+                },
+                IF_TYPE_SOFTWARE_LOOPBACK => {
+                    Flags::LOOPBACK | Flags::MULTICAST
+                },
+                IF_TYPE_ATM => {
+                    Flags::BROADCAST | Flags::POINT_TO_POINT | Flags::MULTICAST // assume all services available; LANE, point-to-point and point-to-multipoint
+                }
+                _ => panic!(format!("Unknown IfType {0} found", (*self.0).IfType))
+            }
+        }
+    }
+}
+
+pub struct InterfaceIterator {
+    adapter_addresses_buffer: Vec<u8>,
+    current_ptr: PIP_ADAPTER_ADDRESSES,
+}
+
+impl InterfaceIterator {
+    fn from(mut adapter_addresses_buffer: Vec<u8>) -> Self {
+        let start_ptr: PIP_ADAPTER_ADDRESSES = unsafe { std::mem::transmute(adapter_addresses_buffer.as_mut_ptr()) };
+        Self {adapter_addresses_buffer, current_ptr: start_ptr }
+    }
+}
+
+impl Iterator for InterfaceIterator {
+    type Item = Interface;
+    fn next(&mut self) -> Option<Interface> {
+        if self.current_ptr != std::ptr::null_mut() {
+            let interface = Interface(self.current_ptr);
+            self.current_ptr = unsafe { (*self.current_ptr).Next } ;
+            Some(interface)
+        }
+        else {
+            None
+        }
+    }
+}
+
+struct IpAddrIterator {
+    adapter_unicast_ptr: PIP_ADAPTER_UNICAST_ADDRESS_LH,
+    current_ptr: PIP_ADAPTER_UNICAST_ADDRESS_LH,
+}
+
+impl IpAddrIterator {
+    fn from(adapter_unicast_ptr: PIP_ADAPTER_UNICAST_ADDRESS_LH) -> Self {
+        Self { adapter_unicast_ptr, current_ptr: adapter_unicast_ptr }
+    }
+}
+
+impl Iterator for IpAddrIterator {
+    type Item = IpAddr;
+    fn next(&mut self) -> Option<IpAddr> {
+        if self.current_ptr != std::ptr::null_mut() {
+            let ip_addr = unsafe { socket_address_to_ipaddr(&(*self.current_ptr).Address) };
+            self.current_ptr = unsafe { (*self.current_ptr).Next };
+            Some(ip_addr)
+        }
+        else {
+            None
+        }
+    }
 }
 
 unsafe fn socket_address_to_ipaddr(socket_address: &SOCKET_ADDRESS) -> IpAddr {
@@ -60,126 +151,104 @@ unsafe fn socket_address_to_ipaddr(socket_address: &SOCKET_ADDRESS) -> IpAddr {
         .unwrap_or_else(|| IpAddr::V6(*sockaddr.as_inet6().unwrap().ip()))
 }
 
-unsafe fn get_dns_servers(mut dns_server_ptr: PIP_ADAPTER_DNS_SERVER_ADDRESS_XP) -> Result<Vec<IpAddr>> {
-    let mut dns_servers = vec![];
-
-    while dns_server_ptr != std::ptr::null_mut() {
-        let dns_server = &*dns_server_ptr;
-        let ipaddr = socket_address_to_ipaddr(&dns_server.Address);
-        dns_servers.push(ipaddr);
-
-        dns_server_ptr = dns_server.Next;
-    }
-
-    Ok(dns_servers)
-}
-
-unsafe fn get_unicast_addresses(mut unicast_addresses_ptr: PIP_ADAPTER_UNICAST_ADDRESS_LH) -> Result<Vec<IpAddr>> {
-    let mut unicast_addresses = vec![];
-
-    while unicast_addresses_ptr != std::ptr::null_mut() {
-        let unicast_address = &*unicast_addresses_ptr;
-        let ipaddr = socket_address_to_ipaddr(&unicast_address.Address);
-        unicast_addresses.push(ipaddr);
-
-        unicast_addresses_ptr = unicast_address.Next;
-    }
-
-    Ok(unicast_addresses)
-}
-
-fn get_addrs() -> Result<impl Iterator<Item=IpAddr>, Error> {
-    // TODO: Call GetAdapters here or something
-    unimplemented!()
-}   extern crate winapi;
-use self::winapi::{AF_UNSPEC, ERROR_SUCCESS, ERROR_BUFFER_OVERFLOW, ULONG};
-
-//fn GetAdaptersAddresses ( Family : ULONG , Flags : ULONG , Reserved : PVOID , AdapterAddresses : PIP_ADAPTER_ADDRESSES , SizePointer : PULONG , ) -> ULONG; 
-
-pub fn get_adapters() -> Result<Vec<Adapter>> {
+pub fn get_interfaces() -> Result<InterfaceIterator, Error> {
     unsafe {
         let mut buf_len: ULONG = 0;
         let result = GetAdaptersAddresses(AF_UNSPEC as u32, 0, std::ptr::null_mut(), std::ptr::null_mut(), &mut buf_len as *mut ULONG);
+        println!("######called");
 
         assert!(result != ERROR_SUCCESS);
 
+        // TODO: handle all other errors this function can return properly. See this for list of errors: https://msdn.microsoft.com/en-us/library/windows/desktop/aa365915(v=vs.85).aspx 
         if result != ERROR_BUFFER_OVERFLOW {
-            bail!(ErrorKind::Os(result));
+            bail!(WindowsError::UnknownError { error_code: result }); // TODO: design proper error types and return that
         }
 
         let mut adapters_addresses_buffer: Vec<u8> = vec![0; buf_len as usize];
         let mut adapter_addresses_ptr: PIP_ADAPTER_ADDRESSES = std::mem::transmute(adapters_addresses_buffer.as_mut_ptr());
-        let result = GetAdaptersAddresses(AF_UNSPEC as u32, 0, std::ptr::null_mut(), adapter_addresses_ptr, &mut buf_len as *mut ULONG);
+        let mut result = GetAdaptersAddresses(AF_UNSPEC as u32, 0, std::ptr::null_mut(), adapter_addresses_ptr, &mut buf_len as *mut ULONG);
 
-        if result != ERROR_SUCCESS {
-            bail!(ErrorKind::Os(result));
+        // Buffer overflowed again? Try once more, now with ~15K buffer as recommended on MSDN (unless buf_len requested is even larger)
+        // (See https://msdn.microsoft.com/en-us/library/windows/desktop/aa365915(v=vs.85).aspx)
+        if result == ERROR_BUFFER_OVERFLOW {
+            const RECOMMENDED_BUF_LEN: u32 = 15000;
+            buf_len  = std::cmp::max(RECOMMENDED_BUF_LEN, buf_len); 
+            adapters_addresses_buffer = vec![0; buf_len as usize];
+            adapter_addresses_ptr = std::mem::transmute(adapters_addresses_buffer.as_mut_ptr());
+            result = GetAdaptersAddresses(AF_UNSPEC as u32, 0, std::ptr::null_mut(), adapter_addresses_ptr, &mut buf_len as *mut ULONG);
+        }
+        else if result != ERROR_SUCCESS {
+            bail!(WindowsError::UnknownError { error_code: result }); // TODO: design proper error types and return that
         }
 
-        let mut adapters = vec![];
-        while adapter_addresses_ptr != std::ptr::null_mut() {
-            adapters.push(get_adapter(adapter_addresses_ptr)?);
-            adapter_addresses_ptr = (*adapter_addresses_ptr).Next;
-        }
+        // let mut adapters = vec![];
+        // while adapter_addresses_ptr != std::ptr::null_mut() {
+        //     adapters.push(get_adapter(adapter_addresses_ptr)?);
+        //     adapter_addresses_ptr = (*adapter_addresses_ptr).Next;l
+        // }
 
-        Ok(adapters)
+        Ok(InterfaceIterator::from(adapters_addresses_buffer))
     }
 }
 
-unsafe fn get_adapter(adapter_addresses_ptr: PIP_ADAPTER_ADDRESSES) -> Result<Adapter> {
-    let adapter_addresses = &*adapter_addresses_ptr;
-    let adapter_name = CStr::from_ptr(adapter_addresses.AdapterName).to_str()?.to_owned();
-    let dns_servers = get_dns_servers(adapter_addresses.FirstDnsServerAddress)?;
-    let unicast_addresses = get_unicast_addresses(adapter_addresses.FirstUnicastAddress)?;
+// unsafe fn to_interface(adapter_addresses_ptr: PIP_ADAPTER_ADDRESSES) -> Result<Interface, Error> {
+//     let adapter_addresses = &*adapter_addresses_ptr;
+//     let mut index = adapter_addresses.IfIndex; // Using ipV4 if index
+//     if index == 0 { // If ipv4 index was zero. As per MSDN this can happen if ipv4 is disabled on this interface
+//         index = adapter_addresses.Ipv6IfIndex;
+//     }
 
-    let description = WideCString::from_ptr_str(adapter_addresses.Description).to_string()?;
-    let friendly_name = WideCString::from_ptr_str(adapter_addresses.FriendlyName).to_string()?;
-    Ok(Adapter {
-        adapter_name: adapter_name,
-        ip_addresses: unicast_addresses,
-        dns_servers: dns_servers,
-        description: description,
-        friendly_name: friendly_name,
-    })
-}
+//     let mtu = adapter_addresses.Mtu as i32;
 
-unsafe fn socket_address_to_ipaddr(socket_address: &SOCKET_ADDRESS) -> IpAddr {
-    let sockaddr = socket2::SockAddr::from_raw_parts(std::mem::transmute(socket_address.lpSockaddr), socket_address.iSockaddrLength);
+//     let name = WideCString::from_ptr_str(adapter_addresses.FriendlyName).to_string()?; // TODO: can we avoid this allocation and carry &str instead?
 
-    // Could be either ipv4 or ipv6
-    sockaddr.as_inet()
-        .map(|s| IpAddr::V4(*s.ip()))
-        .unwrap_or_else(|| IpAddr::V6(*sockaddr.as_inet6().unwrap().ip()))
-}
+//     let mut flags = Flags::empty();
 
-unsafe fn get_dns_servers(mut dns_server_ptr: PIP_ADAPTER_DNS_SERVER_ADDRESS_XP) -> Result<Vec<IpAddr>> {
-    let mut dns_servers = vec![];
+//     if adapter_addresses.OperStatus == IF_OPER_STATUS_IfOperStatusUp {
+//         flags |= Flags::UP;
+//     }
 
-    while dns_server_ptr != std::ptr::null_mut() {
-        let dns_server = &*dns_server_ptr;
-        let ipaddr = socket_address_to_ipaddr(&dns_server.Address);
-        dns_servers.push(ipaddr);
+//     // Shamelessly copied from what the Golang people are doing.
+//     // There is also a comment that ideally the below info should come from MIB_IF_ROW2.AccessType. But go with this for now.
+//     match adapter_addresses.IfType {
+//         IF_TYPE_ETHERNET_CSMACD  | IF_TYPE_ISO88025_TOKENRING | IF_TYPE_IEEE80211 | IF_TYPE_IEEE1394 => {
+//             flags |= Flags::BROADACAST | Flags::MULTICAST;
+//         },
+//         IF_TYPE_PPP | IF_TYPE_TUNNEL = {
+//             flags |= Flags::POINTTOPOINT | Flags::MULTICAST
+//         },
+//         IF_TYPE_SOFTWARE_LOOPBACK => {
+//             flags |= Flags::LOOPBACK | Flags::MULTICAST
+//         },
+//         IF_TYPE_ATM => {
+//             flags |= Flags::BROADCAST | Flags::POINTTOPOINT | Flags::MULTICAST // assume all services available; LANE, point-to-point and point-to-multipoint
+//         },
+//     }
 
-        dns_server_ptr = dns_server.Next;
-    }
+//     let hw_addr = if (adapter_addresses.PhysicalAddressLength > 0) { }
 
-    Ok(dns_servers)
-}
+//     Ok(Interface { index, mtu, name,  })
+// }
 
-unsafe fn get_unicast_addresses(mut unicast_addresses_ptr: PIP_ADAPTER_UNICAST_ADDRESS_LH) -> Result<Vec<IpAddr>> {
-    let mut unicast_addresses = vec![];
+// unsafe fn socket_addressto_ipaddr(socket_address: &SOCKET_ADDRESS) -> IpAddr {
+//     let sockaddr = socket2::SockAddr::from_raw_parts(std::mem::transmute(socket_address.lpSockaddr), socket_address.iSockaddrLength);
 
-    while unicast_addresses_ptr != std::ptr::null_mut() {
-        let unicast_address = &*unicast_addresses_ptr;
-        let ipaddr = socket_address_to_ipaddr(&unicast_address.Address);
-        unicast_addresses.push(ipaddr);
+//     // Could be either ipv4 or ipv6
+//     sockaddr.as_inet()
+//         .map(|s| IpAddr::V4(*s.ip()))
+//         .unwrap_or_else(|| IpAddr::V6(*sockaddr.as_inet6().unwrap().ip()))
+// }
 
-        unicast_addresses_ptr = unicast_address.Next;
-    }
+// unsafe fn get_unicast_addresses(mut unicast_addresses_ptr: PIP_ADAPTER_UNICAST_ADDRESS_LH) -> Result<Vec<IpAddr>> {
+//     let mut unicast_addresses = vec![];
 
-    Ok(unicast_addresses)
-}
+//     while unicast_addresses_ptr != std::ptr::null_mut() {
+//         let unicast_address = &*unicast_addresses_ptr;
+//         let ipaddr = socket_address_to_ipaddr(&unicast_address.Address);
+//         unicast_addresses.push(ipaddr);
 
-fn get_addrs() -> Result<impl Iterator<Item=IpAddr>, Error> {
-    // TODO: Call GetAdapters here or something
-    unimplemented!()
-}
+//         unicast_addresses_ptr = unicast_address.Next;
+//     }
+
+//     Ok(unicast_addresses)
+// }
