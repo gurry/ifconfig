@@ -6,9 +6,6 @@ extern crate winapi;
 extern crate widestring;
 extern crate socket2;
 
-use failure::Error;
-use std::net::IpAddr;
-
 mod os;
 mod data_types;
 
@@ -31,8 +28,20 @@ bitflags! {
     }
 }
 
+#[derive(Debug, Fail)]
+pub enum IfConfigError {
+    #[fail(display = "OS error: {}", error_code)]
+    OsError {
+        error_code: u32,
+    },
+     #[fail(display = "Hardware addr has unsupported length {}", len)]
+    BadHardwareAddr {
+        len: usize,
+    }
+}
+
 // Returns a list of the system's network interfaces.
-pub fn get_interfaces() -> Result<impl Iterator<Item=Interface>, Error> {
+pub fn get_interfaces() -> Result<impl Iterator<Item=Interface>, IfConfigError> {
     imp::get_interfaces()
 }
 
@@ -54,6 +63,7 @@ mod test {
         }
     }
 }
+
 
 // Returns a list of the system's unicast interface addresses.
 //
