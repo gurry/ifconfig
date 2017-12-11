@@ -113,7 +113,7 @@ impl Interface {
                 IF_TYPE_ATM => {
                     Flags::BROADCAST | Flags::POINT_TO_POINT | Flags::MULTICAST // assume all services available; LANE, point-to-point and point-to-multipoint
                 }
-                _ => panic!(format!("Unknown IfType {0} found", (*self.0).IfType))
+                _ => Flags::empty()
             }
         }
     }
