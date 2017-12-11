@@ -6,10 +6,6 @@ extern crate winapi;
 extern crate widestring;
 extern crate socket2;
 
-use std::io;
-use std::ptr;
-use std::ffi::CStr;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use failure::Error;
 
 mod os;
@@ -23,8 +19,6 @@ use os::windows as imp;
 
 #[cfg(target_os = "windows")]
 pub use os::windows::Interface as Interface;
-#[cfg(target_os = "windows")]
-use os::windows::InterfaceIterator;
 
 bitflags! {
     struct Flags: u32 {
@@ -49,17 +43,11 @@ mod test {
     fn basic() {
         let interfaces = get_interfaces().unwrap();
         for i in interfaces {
-            println!("{:?}", i.index());
-            println!("{:?}", i.name());
-            println!("{:?}", i.mtu());
+            let index = i.index();
+            let name = i.name();
+            let mtu = i.mtu();
+            let ip_addr: Vec<IpAddr> = i.ip_addrs().collect();
         }
-        // println!(
-        //     "{:?}",
-        //     addrs
-        //         .iter()
-        //         .map(|a| (a.name(), a.addr()))
-        //         .collect::<Vec<_>>()
-        // );
     }
 }
 

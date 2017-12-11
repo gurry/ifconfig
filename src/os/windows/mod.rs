@@ -155,7 +155,6 @@ pub fn get_interfaces() -> Result<InterfaceIterator, Error> {
     unsafe {
         let mut buf_len: ULONG = 0;
         let result = GetAdaptersAddresses(AF_UNSPEC as u32, 0, std::ptr::null_mut(), std::ptr::null_mut(), &mut buf_len as *mut ULONG);
-        println!("######called");
 
         assert!(result != ERROR_SUCCESS);
 
