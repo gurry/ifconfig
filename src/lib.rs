@@ -50,7 +50,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn basic() {
+    fn should_not_panic() {
         let interfaces = get_interfaces().unwrap();
         for i in interfaces {
             let index = i.index();
