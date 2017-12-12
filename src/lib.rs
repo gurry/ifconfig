@@ -40,10 +40,20 @@ pub enum IfConfigError {
         len: usize,
     },
 
+    #[fail(display = "No Hardware addr found")]
+    HardwareAddrError,
+
     #[fail(display = "{}", msg)]
     BadStringFormat {
         msg: String
-    }
+    },
+
+    #[fail(display = "{}", msg)]
+    ValueNotFound {
+        msg: String
+    },
+
+
 }
 
 // Returns a list of the system's network interfaces.

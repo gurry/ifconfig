@@ -1,12 +1,13 @@
 pub const EUI48_LEN: usize = 6;
 
 // IEEE MAC-48, EUI-48 and EUI-64 form
-pub struct HardwareAddr<'a> {
-    bytes: &'a [u8; EUI48_LEN], // TODO: Should we also cater for 8 byte EUI-64 addresses?
+pub struct HardwareAddr {
+    // TODO: should we be carrying a reference to the byte array instead of a copy? Will that be faster?
+    bytes: [u8; EUI48_LEN], // TODO: Should we also cater for 8 byte EUI-64 addresses?
 }
 
-impl<'a> HardwareAddr<'a> {
-    pub fn from_bytes(bytes: &'a [u8; EUI48_LEN]) -> Self {
+impl HardwareAddr {
+    pub fn from_bytes(bytes: [u8; EUI48_LEN]) -> Self {
         Self { bytes }
     }
 

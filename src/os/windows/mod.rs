@@ -33,8 +33,8 @@ impl Interface {
         index
     }
 
-    pub fn mtu(&self) -> u32 { // TODO: what does a value of 0xffffffff mean for the MTU field in the inner struct
-        unsafe { (*self.0).Mtu }
+    pub fn mtu(&self) -> Option<u32> { // TODO: what does a value of 0xffffffff mean for the MTU field in the inner struct
+        Some(unsafe { (*self.0).Mtu })
     }
 
     pub fn name(&self) -> Result<&str, IfConfigError> {
@@ -73,7 +73,7 @@ impl Interface {
             }
             else {
                 let ptr: *const u8 = (*self.0).PhysicalAddress.as_ptr();
-                let bytes =  &*(ptr as *const [u8; 6]);
+                let bytes = *(ptr as *const [u8; 6]);
                 Ok(Some(HardwareAddr::from_bytes(bytes)))
             }
          }
