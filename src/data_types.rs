@@ -17,12 +17,13 @@ impl HardwareAddr {
     }
 }
 
+// TODO: There are many other flags in addition to those given below in the net link API that should probably also be included here
 bitflags! {
     pub struct Flags: u32 {
-        const UP              = 0b00000001; // Inteface is up
-        const BROADCAST       = 0b00000010; // Interface supports broadcast
-        const LOOPBACK        = 0b00000100; // Interface is loopback
-        const POINT_TO_POINT  = 0b00001000; // Interface is part of a point-to-point link
-        const MULTICAST       = 0b00010000; // Interface supports multicast
+        const UP              = 0x1; // Inteface is up
+        const BROADCAST       = 0x2; // Interface supports broadcast
+        const LOOPBACK        = 0x8; // Interface is loopback
+        const POINT_TO_POINT  = 0x10; // Interface is part of a point-to-point link
+        const MULTICAST       = 0x1000; // Interface supports multicast
     }
 }

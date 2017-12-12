@@ -8,7 +8,7 @@ use pnetlink::packet::netlink::NetlinkConnection;
 use pnetlink::packet::route::link::{Links,Link, LinksIterator};
 use pnetlink::packet::route::addr::{Addresses,Addr};
 
-pub struct Interface(Link);
+pub struct Interface(Link, IpAddrIterator);
 
 impl Interface {
     pub fn index(&self) -> u32 {
@@ -35,15 +35,16 @@ impl Interface {
     }
 
     pub fn hw_addr(&self) -> Result<Option<HardwareAddr>, IfConfigError> {
-        self.0.get_hw_addr().and_then(|mac_addr| {
+        // TODO: investigate why get_hw_addr() will ever return None. If it's due to an error in underlying netlink APIs then we should return an error here
+        Ok(self.0.get_hw_addr().and_then(|mac_addr| {
             Some(HardwareAddr::from_bytes([mac_addr.0, mac_addr.1, mac_addr.2, mac_addr.3, mac_addr.4, mac_addr.5]))
-        }).ok_or(IfConfigError::HardwareAddrError)
+        }))
     }
 
     // TODO: this should also include anycast addresses they way golang implementatio does
     /// Get the adapter's ip addresses (unicast ip addresses)
-    pub fn ip_addrs(&self) -> impl Iterator<Item=IpAddr> { // TODO: Should we rename this to unicast_ip_addresses?
-        IpAddrIterator::from(unsafe { (*self.0).FirstUnicastAddress })
+    pub fn ip_addrs(&self) -> Result<impl Iterator<Item=IpAddr>, IfConfigError> { // TODO: Should we rename this to unicast_ip_addresses?
+        Ok(self.1)
     }
 
     // pub fn ip_addrs_multicast(&self) -> impl Iterator<Item=IpAddr> { // TODO: Should we rename this to unicast_ip_addresses?
@@ -52,67 +53,51 @@ impl Interface {
 
 
     pub fn flags(&self) -> Flags {
-        // Shamelessly copied from what the Golang people are doing.
-        // There is also a comment that ideally the below info should come from MIB_IF_ROW2.AccessType. But go with this for now.
-        unsafe {
-            match (*self.0).IfType {
-                IF_TYPE_ETHERNET_CSMACD | IF_TYPE_ISO88025_TOKENRING | IF_TYPE_IEEE80211 | IF_TYPE_IEEE1394 => {
-                    Flags::BROADCAST | Flags::MULTICAST
-                },
-                IF_TYPE_PPP | IF_TYPE_TUNNEL => {
-                    Flags::POINT_TO_POINT | Flags::MULTICAST
-                },
-                IF_TYPE_SOFTWARE_LOOPBACK => {
-                    Flags::LOOPBACK | Flags::MULTICAST
-                },
-                IF_TYPE_ATM => {
-                    Flags::BROADCAST | Flags::POINT_TO_POINT | Flags::MULTICAST // assume all services available; LANE, point-to-point and point-to-multipoint
-                }
-                _ => Flags::empty()
-            }
-        }
+        self.0.get_flags() & Flags::all()
     }
 }
 
 pub struct InterfaceIterator {
-    links_iterator: Box<LinksIterator<&mut Self>>
+    netlink_connection: NetlinkConnection,
+    links_iterator: Option<Box<LinksIterator<&mut NetlinkConnection>>>,
 }
 
 
 impl Iterator for InterfaceIterator {
     type Item = Interface;
     fn next(&mut self) -> Option<Interface> {
-        self.links_iterator.next().and_then(|l| Some(Interface(l)))
+        if (self.links_iterator.is_none()) {
+            self.links_iterator = Some(self.netlink_connection.links_iter())
+        }
+        
+        match self.links_iterator.next() {
+            Some(link) => {
+                let ip_iter = self.conn.get_link_addrs(None, &link);
+                Some(Interface(link, ip_iter))
+            },
+            None => None,
+        }
     }
 }
 
 struct IpAddrIterator {
-    _adapter_unicast_ptr: PIP_ADAPTER_UNICAST_ADDRESS_LH,
-    current_ptr: PIP_ADAPTER_UNICAST_ADDRESS_LH,
+    net_link_addr_iterator: Box<Iterator<Item=Addr>>
 }
 
 impl IpAddrIterator {
-    fn from(adapter_unicast_ptr: PIP_ADAPTER_UNICAST_ADDRESS_LH) -> Self {
-        Self { _adapter_unicast_ptr: adapter_unicast_ptr, current_ptr: adapter_unicast_ptr }
+    fn from(net_link_addr_iterator: Box<Iterator<Item=Addr>>) -> Self {
+        Self { net_link_addr_iterator }
     }
 }
 
 impl Iterator for IpAddrIterator {
     type Item = IpAddr;
     fn next(&mut self) -> Option<IpAddr> {
-        if self.current_ptr != std::ptr::null_mut() {
-            let ip_addr = unsafe { socket_address_to_ipaddr(&(*self.current_ptr).Address) };
-            self.current_ptr = unsafe { (*self.current_ptr).Next };
-            Some(ip_addr)
-        }
-        else {
-            None
-        }
+        self.net_link_addr_iterator.next().and_then(|a| a.get_local_ip())
     }
 }
 
 pub fn get_interfaces() -> Result<impl Iterator<Item=Interface>, Error> {
-    unimplemented!()
-    // let mut conn = NetlinkConnection::new();
-    // let links = conn.iter_links().unwrap().collect::<Vec<_>>();
+     let mut conn = NetlinkConnection::new();
+     InterfaceIterator(conn.iter_links())
 }
