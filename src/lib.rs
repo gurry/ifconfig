@@ -34,9 +34,15 @@ pub enum IfConfigError {
     OsError {
         error_code: u32,
     },
-     #[fail(display = "Hardware addr has unsupported length {}", len)]
+
+    #[fail(display = "Hardware addr has unsupported length {}", len)]
     BadHardwareAddr {
         len: usize,
+    },
+
+    #[fail(display = "{}", msg)]
+    BadStringFormat {
+        msg: String
     }
 }
 

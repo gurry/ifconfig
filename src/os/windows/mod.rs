@@ -37,20 +37,29 @@ impl Interface {
         unsafe { (*self.0).Mtu }
     }
 
-    pub fn name(&self) -> &str {
-        unsafe { CStr::from_ptr((*self.0).AdapterName) }.to_str().expect("AdapterName could not be converted to &str")
+    pub fn name(&self) -> Result<&str, IfConfigError> {
+        unsafe { CStr::from_ptr((*self.0).AdapterName) }.to_str()
+                        .map_err(|_| IfConfigError::BadStringFormat { // TODO: Do not lose the underlying error Utf8Error here. Add it to the context of IfConfigError somehow
+                            msg: "AdapterName could not be converted to &str".to_string()
+                        })
     }
 
     // TODO: can we return OsStr here instead?
-    pub fn friendly_name(&self) -> String {
+    pub fn friendly_name(&self) -> Result<String, IfConfigError> {
         // Must return an owned string here because there's no way to return a zero-copy &str type since Windows wide strings very different from Rust's utf8 strings
-        unsafe { WideCStr::from_ptr_str((*self.0).FriendlyName) }.to_string().expect("FriendlyName could not be converted to String")
+        unsafe { WideCStr::from_ptr_str((*self.0).FriendlyName) }.to_string()
+                        .map_err(|_| IfConfigError::BadStringFormat { // TODO: Do not lose the underlying error Utf8Error here. Add it to the context of IfConfigError somehow
+                            msg: "FriendlyName could not be converted to Rust String".to_string()
+                        })
     }
 
     // TODO: can we return OsStr here instead?
-    pub fn description(&self) -> String {
+    pub fn description(&self) -> Result<String, IfConfigError> {
         // Must return an owned string here because there's no way to return a zero-copy &str type since Windows wide strings very different from Rust's utf8 strings
-        unsafe { WideCStr::from_ptr_str((*self.0).Description) }.to_string().expect("Description could not be converted to String")
+        unsafe { WideCStr::from_ptr_str((*self.0).Description) }.to_string()
+                        .map_err(|_| IfConfigError::BadStringFormat { // TODO: Do not lose the underlying error Utf8Error here. Add it to the context of IfConfigError somehow
+                            msg: "Description could not be converted to Rust String".to_string()
+                        })
     }
 
     pub fn hw_addr(&self) -> Result<Option<HardwareAddr>, IfConfigError> {
