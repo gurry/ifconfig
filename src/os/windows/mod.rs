@@ -5,8 +5,8 @@ extern crate widestring;
 
 use std;
 use std::ffi::CStr;
-use winapi::{AF_UNSPEC, ERROR_SUCCESS, ERROR_BUFFER_OVERFLOW};
-use widestring::WideCStr;
+use self::winapi::{AF_UNSPEC, ERROR_SUCCESS, ERROR_BUFFER_OVERFLOW};
+use self::widestring::WideCStr;
 use socket2;
 use std::net::IpAddr;
 use data_types::{Flags, HardwareAddr, EUI48_LEN};
