@@ -68,15 +68,29 @@ mod test {
 
     #[test]
     fn should_not_panic() {
-        let interfaces = get_interfaces().unwrap();
+        let interfaces: Vec<Interface> = get_interfaces().unwrap().collect();
+        println!("-----> {} interfaces found", interfaces.len());
+        // if interfaces.len() < 1 {
+        //     panic!("no interfaces");
+        // }
         for i in interfaces {
             let index = i.index();
             let name = i.name();
             let friendly_name = i.friendly_name();
             let mtu = i.mtu();
             let description = i.description ();
-            let ip_addr: Vec<String> = i.ip_addrs().unwrap().map(|ip| ip.to_string()).collect();
+            let ip_addrs: Vec<String> = i.ip_addrs().unwrap().map(|ip| ip.to_string()).collect();
             let hw_addr = i.hw_addr();
+            println!("index: {:?}", index);
+            println!("name: {:?}", name);
+            println!("friendly_name: {:?}", friendly_name);
+            println!("mtu: {:?}", mtu);
+            println!("description: {:?}", description);
+            println!("description: {:?}", description);
+            println!("ip_addrs:");
+            for addr in ip_addrs {
+                println!("   {:?}:", addr);
+            }
         }
     }
 }
