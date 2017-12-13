@@ -1,27 +1,43 @@
 // TODO: Eventually remove dependency on crate pnetlink and replace it with some netlink code written right here.
 // Alternatively, maybe write a properly design netlink crate as well and depend on that.
 // See Go's package https://github.com/vishvananda/netlink for inspiration
-extern crate libc;
 extern crate pnetlink;
 
-use pnetlink::packet::netlink::NetlinkConnection;
-use pnetlink::packet::route::link::{Links,Link, LinksIterator};
-use pnetlink::packet::route::addr::{Addresses,Addr};
+use self::pnetlink::packet::netlink::NetlinkConnection;
+use self::pnetlink::packet::route::link::{Links,Link, LinksIterator};
+use self::pnetlink::packet::route::addr::{Addresses,Addr};
 
-pub struct Interface(Link, IpAddrIterator);
+use std::net::IpAddr;
+use std::io;
+use std::vec::IntoIter;
+
+use data_types::{Flags, HardwareAddr};
+use super::super::IfConfigError;
+
+pub struct Interface {
+    link: Link, 
+    ip_addrs: Vec<IpAddr>,
+    name: String
+}
 
 impl Interface {
+    fn from(link: Link, ip_addrs: Vec<IpAddr>) -> Result<Self, IfConfigError> {
+        let name = link.get_name();
+        if name.is_none() {
+            return Err(IfConfigError::ValueNotFound { msg: "Underlying library returned no value for name".to_string() });
+        }
+        Ok(Self { link, ip_addrs, name: name.unwrap() })
+    }
     pub fn index(&self) -> u32 {
-        self.0.get_index()
+        self.link.get_index()
     }
 
     pub fn mtu(&self) -> Option<u32> { // TODO: what does a value of 0xffffffff mean for the MTU field in the inner struct
-        self.0.get_mtu()
+        self.link.get_mtu()
     }
 
     pub fn name(&self) -> Result<&str, IfConfigError> {
-        // TODO: the underlying netlink library is doing unwrap()s inside the get_name() function. We should ideally do netlink calls ourselves
-        self.0.get_name().ok_or(IfConfigError::ValueNotFound { msg: "Underlying library returned no value for name"})
+        Ok(self.name.as_str())
     }
 
     // TODO: can we return OsStr here instead?
@@ -36,7 +52,7 @@ impl Interface {
 
     pub fn hw_addr(&self) -> Result<Option<HardwareAddr>, IfConfigError> {
         // TODO: investigate why get_hw_addr() will ever return None. If it's due to an error in underlying netlink APIs then we should return an error here
-        Ok(self.0.get_hw_addr().and_then(|mac_addr| {
+        Ok(self.link.get_hw_addr().and_then(|mac_addr| {
             Some(HardwareAddr::from_bytes([mac_addr.0, mac_addr.1, mac_addr.2, mac_addr.3, mac_addr.4, mac_addr.5]))
         }))
     }
@@ -44,7 +60,7 @@ impl Interface {
     // TODO: this should also include anycast addresses they way golang implementatio does
     /// Get the adapter's ip addresses (unicast ip addresses)
     pub fn ip_addrs(&self) -> Result<impl Iterator<Item=IpAddr>, IfConfigError> { // TODO: Should we rename this to unicast_ip_addresses?
-        Ok(self.1)
+        Ok(IpAddrIterator { addrs: self.ip_addrs.clone().into_iter() })
     }
 
     // pub fn ip_addrs_multicast(&self) -> impl Iterator<Item=IpAddr> { // TODO: Should we rename this to unicast_ip_addresses?
@@ -53,51 +69,69 @@ impl Interface {
 
 
     pub fn flags(&self) -> Flags {
-        self.0.get_flags() & Flags::all()
+        Flags::from_bits(self.link.get_flags().bits() & Flags::all().bits()).expect("Creation of flags cannot faile")
     }
 }
 
-pub struct InterfaceIterator {
-    netlink_connection: NetlinkConnection,
-    links_iterator: Option<Box<LinksIterator<&mut NetlinkConnection>>>,
+fn to_interfaces(mut conn: NetlinkConnection) -> Result<IntoIter<Interface>, IfConfigError> {
+    // let req = NetlinkRequestBuilder::new(RTM_GETLINK, NLM_F_DUMP)
+    //     .append(
+    //         IfInfoPacketBuilder::new()
+    //             .build()
+    //     ).build();
+    // try!(conn.write(req.packet()));
+    // let reader = NetlinkReader::new(conn);
+    // let links = LinksIterator { iter: reader.into_iter() }.collect();
+    let links: Vec<Link>;
+    {
+        let res: io::Result<Box<LinksIterator<&mut NetlinkConnection>>> = conn.iter_links();
+        if res.is_err() {
+            return Err(IfConfigError::UnderlyingApiFailed {msg: "Api iter_links() failed".to_string() });
+        }
+        links = res.unwrap().collect();
+    }
+
+    let mut interfaces = Vec::new();
+
+    for link in links {
+        let addrs: Vec<Addr> = conn.get_link_addrs(None, &link).map(|i| i.collect()).unwrap_or(Vec::new());
+        let ip_addrs: Vec<IpAddr> = addrs.iter().map(|a| a.get_local_ip()).filter(|i| i.is_some()).map(|i| i.unwrap()).collect();
+        let interface = Interface::from(link, ip_addrs);
+        if interface.is_err() {
+            return Err(IfConfigError::UnderlyingApiFailed { msg: "Error creating interface".to_string() });
+        }
+
+        interfaces.push(interface.unwrap());
+    }
+
+    Ok(interfaces.into_iter())
 }
 
+pub struct InterfaceIterator {
+    interfaces: IntoIter<Interface>
+}
 
 impl Iterator for InterfaceIterator {
+
     type Item = Interface;
     fn next(&mut self) -> Option<Interface> {
-        if (self.links_iterator.is_none()) {
-            self.links_iterator = Some(self.netlink_connection.links_iter())
-        }
-        
-        match self.links_iterator.next() {
-            Some(link) => {
-                let ip_iter = self.conn.get_link_addrs(None, &link);
-                Some(Interface(link, ip_iter))
-            },
-            None => None,
-        }
+        self.interfaces.next()
     }
 }
 
 struct IpAddrIterator {
-    net_link_addr_iterator: Box<Iterator<Item=Addr>>
-}
-
-impl IpAddrIterator {
-    fn from(net_link_addr_iterator: Box<Iterator<Item=Addr>>) -> Self {
-        Self { net_link_addr_iterator }
-    }
+    addrs: IntoIter<IpAddr>
 }
 
 impl Iterator for IpAddrIterator {
     type Item = IpAddr;
     fn next(&mut self) -> Option<IpAddr> {
-        self.net_link_addr_iterator.next().and_then(|a| a.get_local_ip())
+        self.addrs.next()
     }
 }
 
-pub fn get_interfaces() -> Result<impl Iterator<Item=Interface>, Error> {
-     let mut conn = NetlinkConnection::new();
-     InterfaceIterator(conn.iter_links())
+pub fn get_interfaces() -> Result<InterfaceIterator, IfConfigError> {
+     let conn = NetlinkConnection::new();
+     let interfaces = to_interfaces(conn)?;
+     Ok(InterfaceIterator { interfaces })
 }

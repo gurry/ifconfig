@@ -2,9 +2,8 @@
 
 #[macro_use] extern crate failure;
 #[macro_use] extern crate bitflags;
-extern crate winapi;
-extern crate widestring;
 extern crate socket2;
+
 
 mod os;
 mod data_types;
@@ -15,8 +14,7 @@ use os::linux as imp;
 #[cfg(target_os = "windows")]
 use os::windows as imp;
 
-#[cfg(target_os = "windows")]
-pub use os::windows::Interface as Interface;
+pub use imp::Interface;
 
 bitflags! {
     struct Flags: u32 {
@@ -30,6 +28,11 @@ bitflags! {
 
 #[derive(Debug, Fail)]
 pub enum IfConfigError {
+    #[fail(display = "{}", msg)]
+    UnderlyingApiFailed {
+        msg: String
+    },
+
     #[fail(display = "OS error: {}", error_code)]
     OsError {
         error_code: u32,
@@ -52,8 +55,6 @@ pub enum IfConfigError {
     ValueNotFound {
         msg: String
     },
-
-
 }
 
 // Returns a list of the system's network interfaces.

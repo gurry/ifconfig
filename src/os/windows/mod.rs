@@ -1,5 +1,8 @@
 mod bindings;
 
+extern crate winapi;
+extern crate widestring;
+
 use std;
 use std::ffi::CStr;
 use winapi::{AF_UNSPEC, ERROR_SUCCESS, ERROR_BUFFER_OVERFLOW};

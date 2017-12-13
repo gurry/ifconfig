@@ -10,6 +10,7 @@ repository = "https://github.com/gurry/ifconfig"
 failure = "0.1"
 bitflags = "1.0"
 socket2 = "0.2"
+pnetlink = { git = "https://github.com/polachok/pnetlink.git" }
 
 [target.'cfg(windows)'.dependencies]
 winapi = "0.2"
@@ -17,5 +18,4 @@ widestring = "0.2"
 winreg = "0.4"
 
 # [target.'cfg(linux)'.dependencies]
-# pnetlink = "0.0"
-# libc = "0.2"
+# pnetlink = { git = "https://github.com/polachok/pnetlink.git" }
