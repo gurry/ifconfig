@@ -84,8 +84,8 @@ impl Interface {
 
     // TODO: this should also include anycast addresses they way golang implementatio does
     /// Get the adapter's ip addresses (unicast ip addresses)
-    pub fn ip_addrs(&self) -> impl Iterator<Item=IpAddr> { // TODO: Should we rename this to unicast_ip_addresses?
-        IpAddrIterator::from(unsafe { (*self.0).FirstUnicastAddress })
+    pub fn ip_addrs(&self) -> Result<impl Iterator<Item=IpAddr>, IfConfigError> { // TODO: Should we rename this to unicast_ip_addresses?
+        Ok(IpAddrIterator::from(unsafe { (*self.0).FirstUnicastAddress }))
     }
 
     // pub fn ip_addrs_multicast(&self) -> impl Iterator<Item=IpAddr> { // TODO: Should we rename this to unicast_ip_addresses?

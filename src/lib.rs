@@ -75,7 +75,7 @@ mod test {
             let friendly_name = i.friendly_name();
             let mtu = i.mtu();
             let description = i.description ();
-            let ip_addr: Vec<String> = i.ip_addrs().map(|ip| ip.to_string()).collect();
+            let ip_addr: Vec<String> = i.ip_addrs().unwrap().map(|ip| ip.to_string()).collect();
             let hw_addr = i.hw_addr();
         }
     }
