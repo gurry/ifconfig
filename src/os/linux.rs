@@ -95,7 +95,14 @@ fn to_interfaces(mut conn: NetlinkConnection) -> Result<IntoIter<Interface>, IfC
 
     for link in links {
         let addrs: Vec<Addr> = conn.get_link_addrs(None, &link).map(|i| i.collect()).unwrap_or(Vec::new());
-        let ip_addrs: Vec<IpAddr> = addrs.iter().map(|a| a.get_local_ip()).filter(|i| i.is_some()).map(|i| i.unwrap()).collect();
+        let ip_addrs = Vec::new();
+        for addr in addrs.iter() {
+            let local_ip = a.get_local_ip();
+            let prefix_ip = a.get_ip();
+            ip_addrs.push(local_ip);
+            ip_addrs.push(prefix_ip);
+        }
+
         let interface = Interface::from(link, ip_addrs);
         if interface.is_err() {
             return Err(IfConfigError::UnderlyingApiFailed { msg: "Error creating interface".to_string() });
