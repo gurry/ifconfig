@@ -58,6 +58,10 @@ pub enum IfConfigError {
 }
 
 // Returns a list of the system's network interfaces.
+// TODO: RUNNING COLLECT() ON THE ITERATOR RETURNED HERE CAUSES PANIC IN WINDOWS
+// THIS PERHAPS HAPPENS BECAUSE COLLECT RESULTS IN THE ITERATOR BEING DROPPED WHICH
+// RESULTS IN THE BUFFER CONTAINING RESULTS FROM GETADAPTERADDRESSES() BEING DROPPED.
+// FIX THIS
 pub fn get_interfaces() -> Result<impl Iterator<Item=Interface>, IfConfigError> {
     imp::get_interfaces()
 }
