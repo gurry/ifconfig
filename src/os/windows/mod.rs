@@ -3,6 +3,7 @@ mod bindings;
 extern crate winapi;
 extern crate widestring;
 
+use data_types::IpAddrSet;
 use std;
 use std::ffi::CStr;
 use self::winapi::{AF_UNSPEC, ERROR_SUCCESS, ERROR_BUFFER_OVERFLOW};
@@ -84,8 +85,8 @@ impl Interface {
 
     // TODO: this should also include anycast addresses they way golang implementatio does
     /// Get the adapter's ip addresses (unicast ip addresses)
-    pub fn ip_addrs(&self) -> Result<impl Iterator<Item=IpAddr>, IfConfigError> { // TODO: Should we rename this to unicast_ip_addresses?
-        Ok(IpAddrIterator::from(unsafe { (*self.0).FirstUnicastAddress }))
+    pub fn ip_addrs(&self) -> Result<impl Iterator<Item=IpAddrSet>, IfConfigError> { // TODO: Should we rename this to unicast_ip_addresses?
+        Ok(IpAddrSetIterator::from(unsafe { (*self.0).FirstUnicastAddress }))
     }
 
     // pub fn ip_addrs_multicast(&self) -> impl Iterator<Item=IpAddr> { // TODO: Should we rename this to unicast_ip_addresses?
@@ -142,24 +143,25 @@ impl Iterator for InterfaceIterator {
     }
 }
 
-struct IpAddrIterator {
+struct IpAddrSetIterator {
     _adapter_unicast_ptr: PIP_ADAPTER_UNICAST_ADDRESS_LH,
     current_ptr: PIP_ADAPTER_UNICAST_ADDRESS_LH,
 }
 
-impl IpAddrIterator {
+impl IpAddrSetIterator {
     fn from(adapter_unicast_ptr: PIP_ADAPTER_UNICAST_ADDRESS_LH) -> Self {
-        Self { _adapter_unicast_ptr: adapter_unicast_ptr, current_ptr: adapter_unicast_ptr }
+        IpAddrSetIterator { _adapter_unicast_ptr: adapter_unicast_ptr, current_ptr: adapter_unicast_ptr }
     }
 }
 
-impl Iterator for IpAddrIterator {
-    type Item = IpAddr;
-    fn next(&mut self) -> Option<IpAddr> {
+impl Iterator for IpAddrSetIterator {
+    type Item = IpAddrSet;
+    fn next(&mut self) -> Option<IpAddrSet> {
         if self.current_ptr != std::ptr::null_mut() {
-            let ip_addr = unsafe { socket_address_to_ipaddr(&(*self.current_ptr).Address) };
+            let unicast_addr = unsafe { socket_address_to_ipaddr(&(*self.current_ptr).Address) };
+            let prefix_len = unsafe { (*self.current_ptr).OnLinkPrefixLength };
             self.current_ptr = unsafe { (*self.current_ptr).Next };
-            Some(ip_addr)
+            Some(IpAddrSet { unicast_addr, prefix_len })
         }
         else {
             None

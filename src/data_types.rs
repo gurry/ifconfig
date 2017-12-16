@@ -1,4 +1,11 @@
+use std::net::IpAddr;
+
 pub const EUI48_LEN: usize = 6;
+
+pub struct IpAddrSet {
+    pub unicast_addr: IpAddr,
+    pub prefix_len: u8,
+}
 
 // IEEE MAC-48, EUI-48 and EUI-64 form
 pub struct HardwareAddr {

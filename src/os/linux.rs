@@ -11,17 +11,17 @@ use std::net::IpAddr;
 use std::io;
 use std::vec::IntoIter;
 
-use data_types::{Flags, HardwareAddr};
+use data_types::{Flags, HardwareAddr, IpAddrSet};
 use super::super::IfConfigError;
 
 pub struct Interface {
     link: Link, 
-    ip_addrs: Vec<IpAddr>,
+    ip_addrs: Vec<IpAddrSet>,
     name: String
 }
 
 impl Interface {
-    fn from(link: Link, ip_addrs: Vec<IpAddr>) -> Result<Self, IfConfigError> {
+    fn from(link: Link, ip_addrs: Vec<IpAddrSet>) -> Result<Self, IfConfigError> {
         let name = link.get_name();
         if name.is_none() {
             return Err(IfConfigError::ValueNotFound { msg: "Underlying library returned no value for name".to_string() });
@@ -59,8 +59,8 @@ impl Interface {
 
     // TODO: this should also include anycast addresses they way golang implementatio does
     /// Get the adapter's ip addresses (unicast ip addresses)
-    pub fn ip_addrs(&self) -> Result<impl Iterator<Item=IpAddr>, IfConfigError> { // TODO: Should we rename this to unicast_ip_addresses?
-        Ok(IpAddrIterator { addrs: self.ip_addrs.clone().into_iter() })
+    pub fn ip_addrs(&self) -> Result<impl Iterator<Item=IpAddrSet>, IfConfigError> { // TODO: Should we rename this to unicast_ip_addresses?
+        Ok(IpAddrSetIterator { addrs: self.ip_addrs.clone().into_iter() })
     }
 
     // pub fn ip_addrs_multicast(&self) -> impl Iterator<Item=IpAddr> { // TODO: Should we rename this to unicast_ip_addresses?
@@ -95,7 +95,11 @@ fn to_interfaces(mut conn: NetlinkConnection) -> Result<IntoIter<Interface>, IfC
 
     for link in links {
         let addrs: Vec<Addr> = conn.get_link_addrs(None, &link).map(|i| i.collect()).unwrap_or(Vec::new());
-        let ip_addrs: Vec<IpAddr> = addrs.iter().map(|a| a.get_local_ip()).filter(|i| i.is_some()).map(|i| i.unwrap()).collect();
+        let ip_addrs: Vec<IpAddr> = addrs.iter().map(|a| IpAddrSet {
+                unicast_addr: a.get_local_ip(), 
+                prefix_len: a.get_prefix_len())
+            .filter(|i| i.is_some()).map(|i| i.unwrap()).collect();
+
         let interface = Interface::from(link, ip_addrs);
         if interface.is_err() {
             return Err(IfConfigError::UnderlyingApiFailed { msg: "Error creating interface".to_string() });
@@ -119,13 +123,13 @@ impl Iterator for InterfaceIterator {
     }
 }
 
-struct IpAddrIterator {
-    addrs: IntoIter<IpAddr>
+struct IpAddrSetIterator {
+    addrs: IntoIter<IpAddrSet>
 }
 
-impl Iterator for IpAddrIterator {
-    type Item = IpAddr;
-    fn next(&mut self) -> Option<IpAddr> {
+impl Iterator for IpAddrSetIterator {
+    type Item = IpAddrSet;
+    fn next(&mut self) -> Option<IpAddrSet> {
         self.addrs.next()
     }
 }
