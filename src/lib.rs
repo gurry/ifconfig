@@ -79,7 +79,7 @@ mod test {
             let friendly_name = i.friendly_name();
             let mtu = i.mtu();
             let description = i.description ();
-            let ip_addrs: Vec<String> = i.ip_addrs().unwrap().map(|ip| ip.to_string()).collect();
+            let ip_addrs = i.ip_addrs().unwrap();
             let hw_addr = i.hw_addr();
             println!("index: {:?}", index);
             println!("name: {:?}", name);
@@ -89,7 +89,7 @@ mod test {
             println!("description: {:?}", description);
             println!("ip_addrs:");
             for addr in ip_addrs {
-                println!("   {:?}:", addr);
+                println!("    addr: {}, prefix_len:{}", addr.unicast_addr, addr.prefix_len);
             }
         }
     }
