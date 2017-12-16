@@ -2,6 +2,7 @@ use std::net::IpAddr;
 
 pub const EUI48_LEN: usize = 6;
 
+#[derive(Clone)]
 pub struct IpAddrSet {
     pub unicast_addr: IpAddr,
     pub prefix_len: u8,
