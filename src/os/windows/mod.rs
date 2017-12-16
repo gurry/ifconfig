@@ -181,7 +181,7 @@ unsafe fn socket_address_to_ipaddr(socket_address: &SOCKET_ADDRESS) -> IpAddr {
 pub fn get_interfaces() -> Result<InterfaceIterator, IfConfigError> {
     unsafe {
         let mut buf_len: ULONG = 0;
-        let result = GetAdaptersAddresses(AF_UNSPEC as u32, 0, std::ptr::null_mut(), std::ptr::null_mut(), &mut buf_len as *mut ULONG);
+        let mut result = GetAdaptersAddresses(AF_UNSPEC as u32, 0, std::ptr::null_mut(), std::ptr::null_mut(), &mut buf_len as *mut ULONG);
 
         assert!(result != ERROR_SUCCESS);
 
@@ -192,7 +192,7 @@ pub fn get_interfaces() -> Result<InterfaceIterator, IfConfigError> {
 
         let mut adapters_addresses_buffer: Vec<u8> = vec![0; buf_len as usize];
         let mut adapter_addresses_ptr: PIP_ADAPTER_ADDRESSES = std::mem::transmute(adapters_addresses_buffer.as_mut_ptr());
-        let mut result = GetAdaptersAddresses(AF_UNSPEC as u32, 0, std::ptr::null_mut(), adapter_addresses_ptr, &mut buf_len as *mut ULONG);
+        result = GetAdaptersAddresses(AF_UNSPEC as u32, 0, std::ptr::null_mut(), adapter_addresses_ptr, &mut buf_len as *mut ULONG);
 
         // Buffer overflowed again? Try once more, now with ~15K buffer as recommended on MSDN (unless buf_len requested is even larger)
         // (See https://msdn.microsoft.com/en-us/library/windows/desktop/aa365915(v=vs.85).aspx)
